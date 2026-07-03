@@ -4,6 +4,7 @@ import functools
 import html
 import logging
 import re
+import sys
 import threading
 from datetime import datetime, timedelta
 from hashlib import md5
@@ -132,11 +133,14 @@ class DrpgSync:
         self._api.token()
         logger.info("Fetching products list")
 
-        states = [
-            (product, item, self._need_download(product, item, quiet=True))
-            for product in self._api.customer_products()
-            for item in product["files"]
-        ]
+        progress = _ScanProgress()
+        progress.start()
+        states: list[tuple[Product, DownloadItem, bool]] = []
+        for product in self._api.customer_products():
+            for item in product["files"]:
+                states.append((product, item, self._need_download(product, item, quiet=True)))
+                progress.tick()
+        progress.done()
 
         if self._config.search is not None:
             self._report_search(states)
@@ -270,6 +274,41 @@ class DrpgSync:
             return self._config.library_path / product_name / item_name
         else:
             return self._config.library_path / publishers_name / product_name / item_name
+
+
+class _ScanProgress:
+    """A tiny throbber for the read-only library scan.
+
+    Writes to stderr and only when that stream is a terminal, so piping the
+    report to a file (or running under tests) stays clean.
+    """
+
+    _FRAMES = "|/-\\"
+    _STRIDE = 7  # advance the animation every _STRIDE files
+
+    def __init__(self, stream: Any = None) -> None:
+        self._stream = sys.stderr if stream is None else stream
+        self._enabled = self._stream.isatty()
+        self._count = 0
+
+    def start(self) -> None:
+        if self._enabled:
+            self._render()
+
+    def tick(self) -> None:
+        self._count += 1
+        if self._enabled and self._count % self._STRIDE == 0:
+            self._render()
+
+    def _render(self) -> None:
+        frame = self._FRAMES[(self._count // self._STRIDE) % len(self._FRAMES)]
+        self._stream.write(f"\r{frame} Scanned {self._count} files...")
+        self._stream.flush()
+
+    def done(self) -> None:
+        if self._enabled:
+            self._stream.write("\r\033[K")  # carriage return + clear to end of line
+            self._stream.flush()
 
 
 def _normalize_path_part(part: str, compatibility_mode: bool) -> str:

@@ -436,6 +436,31 @@ class DrpgReportTest(TestCase):
         self.assertEqual(out, "")
 
 
+class ScanProgressTest(TestCase):
+    class _FakeTty(io.StringIO):
+        def isatty(self):
+            return True
+
+    def test_animates_on_tty(self):
+        stream = self._FakeTty()
+        progress = drpg.sync._ScanProgress(stream)
+        progress.start()
+        for _ in range(drpg.sync._ScanProgress._STRIDE):
+            progress.tick()
+        progress.done()
+        out = stream.getvalue()
+        self.assertIn("Scanned", out)
+        self.assertRegex(out, r"[|/\-\\]")
+
+    def test_silent_when_not_a_tty(self):
+        stream = io.StringIO()  # isatty() -> False
+        progress = drpg.sync._ScanProgress(stream)
+        progress.start()
+        progress.tick()
+        progress.done()
+        self.assertEqual(stream.getvalue(), "")
+
+
 class EscapePathTest(TestCase):
     def test_substitute_whitespaces(self):
         for whitespace in string.whitespace:
