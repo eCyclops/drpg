@@ -50,6 +50,27 @@ class ParseCliTest(TestCase):
         cmd._parse_cli(["--compatibility-mode", "--omit-publisher", "--token", "mock_token"])
         error_mock.assert_called()
 
+    def test_report_flags_default_off(self):
+        config = cmd._parse_cli(["--token", "mock_token"])
+        self.assertFalse(config.summary)
+        self.assertFalse(config.status)
+        self.assertIsNone(config.search)
+
+    def test_report_flags_parse(self):
+        summary = cmd._parse_cli(["--token", "t", "--summary"])
+        self.assertTrue(summary.summary)
+
+        status = cmd._parse_cli(["--token", "t", "--status"])
+        self.assertTrue(status.status)
+
+        search = cmd._parse_cli(["--token", "t", "--search", "dragon"])
+        self.assertEqual(search.search, "dragon")
+
+    @mock.patch("drpg.cmd.argparse.ArgumentParser.error")
+    def test_report_mutually_exclusive_group(self, error_mock):
+        cmd._parse_cli(["--token", "t", "--summary", "--status"])
+        error_mock.assert_called()
+
 
 class SignalHandlerTest(TestCase):
     @mock.patch("drpg.cmd.sys.exit")

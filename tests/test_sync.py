@@ -1,5 +1,7 @@
+import io
 import json
 import string
+from contextlib import redirect_stdout
 from datetime import datetime, timedelta
 from functools import partial
 from hashlib import md5
@@ -27,6 +29,9 @@ class dummy_config:
     compatibility_mode = False
     omit_publisher = False
     do_check = True
+    summary = False
+    status = False
+    search = None
 
 
 PathMock = partial(mock.Mock, spec=Path)
@@ -346,6 +351,89 @@ class DrpgSyncTest(TestCase):
                 for i in range(files_count)
             ],
         )
+
+
+class DrpgReportTest(TestCase):
+    """The read-only --summary / --status / --search modes."""
+
+    def setUp(self):
+        self.config = dummy_config()
+        self.sync = drpg.DrpgSync(self.config)
+
+    @staticmethod
+    def _product(name, filenames):
+        return types.Product(
+            productId=f"id-{name}",
+            publisher=types.Publisher(name="Pub"),
+            name=name,
+            orderProductId=1,
+            fileLastModified=datetime.now().isoformat(),
+            files=[
+                types.DownloadItem(index=i, filename=fn, checksums=[])
+                for i, fn in enumerate(filenames)
+            ],
+        )
+
+    # Files with "have" in the name are up to date; everything else needs download.
+    @staticmethod
+    def _reason(product, item):
+        return None if "have" in item["filename"] else "local file does not exist"
+
+    def _run_report(self):
+        products = [
+            self._product("Dragon Heist", ["red-dragon-have.pdf", "map-missing.pdf"]),
+            self._product("Vampire", ["curse-have.pdf"]),
+        ]
+        buf = io.StringIO()
+        with (
+            mock.patch("drpg.api.DrpgApi.token", return_value={"access_token": "t"}),
+            mock.patch("drpg.api.DrpgApi.customer_products", return_value=products),
+            mock.patch("drpg.DrpgSync._download_reason", side_effect=self._reason),
+            mock.patch("drpg.sync.logger"),
+            redirect_stdout(buf),
+        ):
+            self.sync.report()
+        return buf.getvalue()
+
+    def test_summary(self):
+        self.config.summary = True
+        out = self._run_report()
+        self.assertIn("2 up to date", out)
+        self.assertIn("1 need download", out)
+        # A bare summary never lists individual files.
+        self.assertNotIn("map-missing.pdf", out)
+
+    def test_status_lists_needed_files(self):
+        self.config.status = True
+        out = self._run_report()
+        self.assertIn("2 up to date", out)
+        self.assertIn("1 need download:", out)
+        self.assertIn("map-missing.pdf", out)
+        # Up-to-date files are not listed.
+        self.assertNotIn("red-dragon-have.pdf", out)
+
+    def test_search_matches_product_name(self):
+        self.config.search = "dragon"
+        out = self._run_report()
+        # Both files under "Dragon Heist" match via the product name.
+        self.assertIn("red-dragon-have.pdf", out)
+        self.assertIn("map-missing.pdf", out)
+        self.assertNotIn("curse-have.pdf", out)
+        # Statuses are tagged per match.
+        self.assertIn("[up to date]", out)
+        self.assertIn("[need download]", out)
+
+    def test_search_matches_filename_case_insensitive(self):
+        self.config.search = "CURSE"
+        out = self._run_report()
+        self.assertIn("curse-have.pdf", out)
+        self.assertIn("[up to date]", out)
+        self.assertNotIn("map-missing.pdf", out)
+
+    def test_search_no_match_prints_nothing(self):
+        self.config.search = "nonexistent"
+        out = self._run_report()
+        self.assertEqual(out, "")
 
 
 class EscapePathTest(TestCase):

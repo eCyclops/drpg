@@ -122,6 +122,48 @@ class DrpgSync:
             pool.starmap(self._process_item, process_item_args)
         logger.info("Done!")
 
+    def report(self) -> None:
+        """Print a read-only view of the library. Never downloads anything.
+
+        Selects one of --summary, --status or --search based on the config.
+        """
+
+        logger.info("Authenticating")
+        self._api.token()
+        logger.info("Fetching products list")
+
+        states = [
+            (product, item, self._need_download(product, item, quiet=True))
+            for product in self._api.customer_products()
+            for item in product["files"]
+        ]
+
+        if self._config.search is not None:
+            self._report_search(states)
+        elif self._config.status:
+            self._report_status(states)
+        else:
+            self._report_summary(states)
+
+    def _report_summary(self, states: list[tuple[Product, DownloadItem, bool]]) -> None:
+        need = sum(1 for *_, needs in states if needs)
+        print(f"{len(states) - need} up to date")
+        print(f"{need} need download")
+
+    def _report_status(self, states: list[tuple[Product, DownloadItem, bool]]) -> None:
+        needers = [(product, item) for product, item, needs in states if needs]
+        print(f"{len(states) - len(needers)} up to date")
+        print(f"{len(needers)} need download:")
+        for product, item in needers:
+            print(f"  {self._file_path(product, item)}")
+
+    def _report_search(self, states: list[tuple[Product, DownloadItem, bool]]) -> None:
+        term = (self._config.search or "").lower()
+        for product, item, needs in states:
+            if term in product["name"].lower() or term in item["filename"].lower():
+                tag = "[need download]" if needs else "[up to date]   "
+                print(f"{tag} {self._file_path(product, item)}")
+
     @suppress_errors(httpx.HTTPError, PermissionError)
     def _process_item(self, product: Product, item: DownloadItem) -> None:
         """Prepare for and download the item to the sync directory."""
@@ -172,45 +214,51 @@ class DrpgSync:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(file_response.content)
 
-    def _need_download(self, product: Product, item: DownloadItem) -> bool:
-        """Specify whether or not the item needs to be downloaded."""
+    def _need_download(self, product: Product, item: DownloadItem, quiet: bool = False) -> bool:
+        """Specify whether or not the item needs to be downloaded.
+
+        Set quiet=True to skip the per-file log lines (used by the read-only
+        report modes, whose own output would otherwise be buried).
+        """
+
+        reason = self._download_reason(product, item)
+        if reason is not None:
+            if not quiet:
+                logger.debug(
+                    "Needs download: %s - %s: %s",
+                    product["name"],
+                    item["filename"],
+                    reason,
+                )
+            return True
+
+        if not quiet:
+            logger.info("Up to date: %s - %s", product["name"], item["filename"])
+        return False
+
+    def _download_reason(self, product: Product, item: DownloadItem) -> str | None:
+        """Return why the item needs downloading, or None if it is up to date."""
 
         path = self._file_path(product, item)
 
         if not path.exists():
-            logger.debug(
-                "Needs download: %s - %s: local file does not exist",
-                product["name"],
-                item["filename"],
-            )
-            return True
+            return "local file does not exist"
 
         remote_time = datetime.fromisoformat(product["fileLastModified"]).utctimetuple()
         local_time = (
             datetime.fromtimestamp(path.stat().st_mtime) + timedelta(seconds=timezone)
         ).utctimetuple()
         if remote_time > local_time:
-            logger.debug(
-                "Needs download: %s - %s: local file is outdated",
-                product["name"],
-                item["filename"],
-            )
-            return True
+            return "local file is outdated"
 
         if (
             self._config.use_checksums
             and (checksum := _newest_checksum(item))
             and md5(path.read_bytes()).hexdigest() != checksum
         ):
-            logger.debug(
-                "Needs download: %s - %s: unmatching checksum",
-                product["name"],
-                item["filename"],
-            )
-            return True
+            return "unmatching checksum"
 
-        logger.info("Up to date: %s - %s", product["name"], item["filename"])
-        return False
+        return None
 
     def _file_path(self, product: Product, item: DownloadItem) -> Path:
         publishers_name = _normalize_path_part(

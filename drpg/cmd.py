@@ -38,7 +38,10 @@ def run() -> None:
     with drpg.DrpgSync(config) as sync:
         sync._shutdown_event = _shutdown_event
         sync.update_check()
-        sync.sync()
+        if config.summary or config.status or config.search is not None:
+            sync.report()
+        else:
+            sync.sync()
 
 
 def _parse_cli(args: CliArgs | None = None) -> Config:
@@ -122,6 +125,28 @@ def _parse_cli(args: CliArgs | None = None) -> Config:
         action="store_true",
         default=environ.get("DRPG_OMIT_PUBLISHER", "false").lower() == "true",
         help="Omit the publisher name in the target path.",
+    )
+
+    report_group = parser.add_mutually_exclusive_group()
+
+    report_group.add_argument(
+        "--summary",
+        action="store_true",
+        default=environ.get("DRPG_SUMMARY", "false").lower() == "true",
+        help="Print how many files are up to date and how many need downloading, then exit.",
+    )
+    report_group.add_argument(
+        "--status",
+        action="store_true",
+        default=environ.get("DRPG_STATUS", "false").lower() == "true",
+        help="Like --summary, but also list the files that need downloading. Does not download.",
+    )
+    report_group.add_argument(
+        "--search",
+        default=environ.get("DRPG_SEARCH"),
+        metavar="TEXT",
+        help="List library files whose product or file name contains TEXT, with their status. "
+        "Does not download.",
     )
 
     return Config.from_namespace(parser.parse_args(args))

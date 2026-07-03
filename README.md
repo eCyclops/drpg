@@ -66,6 +66,14 @@ it will print one line of information to show what file *would* have been downlo
 if the `--dry-run` flag wasn't on. Use this if you want to test out the app without
 taking the time to download anything.
 
+If you just want a quick overview of your library instead of the full per-file
+listing, use one of the read-only report flags (none of these download anything):
+
+- `--summary` prints how many files are up to date and how many need downloading.
+- `--status` does the same, then lists the files that need downloading.
+- `--search TEXT` lists every file whose product name or file name contains
+  `TEXT` (case-insensitive), tagged with its status.
+
 For more information, run the script with `--help`.
 
 ## Found a bug?

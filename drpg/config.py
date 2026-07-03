@@ -17,6 +17,9 @@ class Config:
     omit_publisher: bool = False
     threads: int = 5
     do_check: bool = True
+    summary: bool = False
+    status: bool = False
+    search: str | None = None
 
     @classmethod
     def from_namespace(cls, namespace: Any) -> Config:
@@ -32,4 +35,7 @@ class Config:
             omit_publisher=namespace.omit_publisher,
             threads=namespace.threads,
             do_check=namespace.do_check,
+            summary=namespace.summary,
+            status=namespace.status,
+            search=namespace.search,
         )
