@@ -11,5 +11,7 @@ repository/
 .DS_Store
 .idea
 
+.claude/
+
 flatpak/python3-modules.yaml
 flatpak/repo/
